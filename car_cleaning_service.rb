@@ -1,9 +1,8 @@
 require 'date'
 
 class Car
-  ID_FORMAT = /^([A-Z]){2}([0-9]){2,3}([A-Z]){3}$/
-  attr_reader :number_plate, :date_time_reservation
-  attr_accessor :cleaning_status, :taken
+  attr_reader :number_plate
+  attr_accessor :cleaning_status, :taken, :date_time_reservation
 
   def initialize(number_plate)
     @number_plate = number_plate
@@ -14,18 +13,105 @@ class Car
 end
 
 class CarService
-  attr_accessor :scheduler
+  attr_accessor :scheduler, :current_time, :parking, :cars_processing
 
   def initialize(scheduler)
     @scheduler = scheduler
+    @parking = []
+    @cars_processing = []
+    @current_time = DateTime.now
   end
 
-  def first_car_wash_track(car, finish_time)
-    puts "Washing the #{car.model}"
+  def forward_time
+    puts "Number of hours to forward: \n"
+    hours = gets.chomp
+    puts "Old time: #{@current_time}"
+    @current_time += (hours.to_i / 24.0)
+    puts "New time #{@current_time}"
   end
 
-  def second_car_wash_track(car, finish_time)
-    puts "Washing the #{car.model} at track 2"
+  def check_status_cars
+    case @cars_processing.size
+    when 1
+      first_car_wash_track(@cars_processing[0])
+    when 2
+      first_car_wash_track(@cars_processing[0])
+      second_car_wash_track(@cars_processing[0])
+    end
+    planning_cars
+  end
+
+  def pick_up_car(number_plate)
+    if @parking.include?(number_plate)
+      puts "The car with the number plate #{number_plate} was picked-up. Another client happy :D"
+      @parking.delete(number_plate)
+    else
+      puts 'Sorry, the car is not here! Check the number plate!'
+    end
+  end
+
+  private
+
+  def planning_cars
+    puts 'Nothing to clean' if @scheduler.agenda.empty?
+    @scheduler.agenda.each_with_index do |(_, _), index|
+      if index == @scheduler.agenda.size - 1 && @scheduler.agenda.values[index] == @current_time
+        planning_last_car
+      else
+        planning_multiple_cars(index)
+      end
+    end
+  end
+
+  def guide_cars(first_car, second_car)
+    first_car_wash_track(first_car)
+    second_car_wash_track(second_car)
+  end
+
+  def guide_car(car)
+    first_car_wash_track(car)
+  end
+
+  def planning_last_car
+    @scheduler.agenda.delete(@scheduler.cars[0].number_plate)
+    @cars_processing << @scheduler.cars[0]
+    guide_car(@scheduler.cars.shift)
+  end
+
+  def planning_multiple_cars(index)
+    if @scheduler.agenda.values[index] == @scheduler.agenda.values[index + 1] && @scheduler.agenda.values[index] == @current_time
+      @scheduler.agenda.delete(@scheduler.cars[0].number_plate)
+      @scheduler.agenda.delete(@scheduler.cars[1].number_plate)
+      @cars_processing << @scheduler.cars[0]
+      @cars_processing << @scheduler.cars[1]
+      guide_cars(@scheduler.cars.shift, @scheduler.cars.shift)
+    elsif @scheduler.agenda.values[index] != @scheduler.agenda.values[index + 1] && @scheduler.agenda.values[index] == @current_time
+      @scheduler.agenda.delete(@scheduler.cars[0].number_plate)
+      @cars_processing << @scheduler.cars[0]
+      guide_car(@scheduler.cars.shift)
+    end
+  end
+
+  def first_car_wash_track(car)
+    if car.date_time_reservation.hour + 2 <= @current_time.hour
+      car.cleaning_status = 'Clean'
+      @parking << car.number_plate
+      puts "Car with the number plate #{car.number_plate} is clean"
+      @cars_processing.shift
+    else
+      puts "Washing the #{car.number_plate}"
+    end
+  end
+
+  def second_car_wash_track(car)
+    if car.date_time_reservation.hour + 2 <= @current_time.hour
+      car.cleaning_status = 'Clean'
+      @parking << car.number_plate
+      puts "Car with the number plate #{car.number_plate} is clean"
+      @cars_processing.shift
+    else
+      puts "Washing the #{car.number_plate}"
+    end
   end
 end
 
@@ -33,11 +119,11 @@ class Scheduler
   OPENING_HOUR = 8
   WEEKDAY_CLOSING_HOUR = 18
   SATURDAY_CLOSING_HOUR = 14
-  attr_accessor :agenda, :better_option, :current_processing_cars
+  attr_accessor :agenda, :better_option, :cars
 
   def initialize
     @agenda = {}
-    @current_processing_cars = []
+    @cars = []
     @better_option = false
   end
 
@@ -67,20 +153,18 @@ class Scheduler
       else
         insert_reservation(insert_index, { number_plate => date_time }, :after)
       end
-    else
-      puts 'Nu se poate'
     end
   end
 
   def find_better_time
     better_time_string = []
-    puts "Year:"
+    puts 'Year:'
     better_time_string[0] = gets.chomp
-    puts "Month:"
+    puts 'Month:'
     better_time_string[1] = gets.chomp
-    puts "Day:"
+    puts 'Day:'
     better_time_string[2] = gets.chomp
-    puts "Hour:"
+    puts 'Hour:'
     better_time_string[3] = gets.chomp
     better_time_string
   end
@@ -88,13 +172,19 @@ class Scheduler
   private
 
   def reservation_ok?(index, date_time, number_plate, proximity = :after)
-    puts "The fastest reservation we can made is: #{date_time}. Is it ok for you? \n"
-    answer = gets.chomp
-    if answer.downcase == 'yes'
-      insert_reservation(index, { number_plate => date_time }, proximity)
-    else
+    if date_time.day != DateTime.now.day
+      puts "Sorry. Today we are full. \n"
       puts 'Please tell me a better option for you:'
       @better_option = true
+    else
+      puts "The fastest reservation we can made is: #{date_time}. Is it ok for you? \n"
+      answer = gets.chomp
+      if answer.downcase == 'yes'
+        insert_reservation(index, { number_plate => date_time }, proximity)
+      else
+        puts 'Please tell me a better option for you:'
+        @better_option = true
+      end
     end
   end
 
@@ -118,26 +208,22 @@ class Scheduler
   end
 
   def check_fastest_time_day(day, closing_time)
-    opening_at_eight = false
     @agenda.each_with_index do |(_, _), index|
       break if index == @agenda.size - 1
 
       next unless @agenda.values[index].day == day
-      return index - 1 if @agenda.values[index].hour != OPENING_HOUR && !opening_at_eight
 
-      opening_at_eight = true
       return index if @agenda.values[index].hour <= @agenda.values[index + 1].hour - 4 && \
                       @agenda.values[index].hour <= closing_time - 4
 
-      # the last reservation from that day
-      return index if @agenda.values[index].day + 1 == @agenda.values[index + 1].day && \
+      return index if (@agenda.values[index].day + 1 == @agenda.values[index + 1].day || \
+                      (index + 1 == @agenda.size - 1 && !check_double_time(index + 1))) && \
                       @agenda.values[index].hour <= closing_time - 4
 
-      # daca e are un loc, exact la final de zi
-      return index if @agenda.values[index].day + 1 == @agenda.values[index + 1].day && \
+      return index if (@agenda.values[index].day + 1 == @agenda.values[index + 1].day || \
+                      (index + 1 == @agenda.size - 1 && !check_double_time(index + 1))) && \
                       @agenda.values[index].hour <= closing_time - 2 && !check_double_time(index)
 
-      # fara gap, dar cu loc liber la o statie
       return index if @agenda.values[index].hour <= @agenda.values[index + 1].hour - 2 && \
                       @agenda.values[index].hour <= closing_time - 4 && !check_double_time(index)
     end
@@ -159,18 +245,19 @@ class Scheduler
            else
              DateTime.new(DateTime.now.year, DateTime.now.month, DateTime.now.day, DateTime.now.hour + 1, 0, 0)
            end
-    # if date.saturday? && date.hour >= SATURDAY_CLOSING_HOUR || !date.saturday? && date.hour >= WEEKDAY_CLOSING_HOUR
-    #   puts "Sorry. The car wash is closing. Please make a phone call tomorrow. \n"
-    #else
-    reservation_ok?(index, date, number_plate, :before)
-    #end
+    if date.saturday? && date.hour >= SATURDAY_CLOSING_HOUR || !date.saturday? && date.hour >= WEEKDAY_CLOSING_HOUR \
+      || date.sunday? || date.hour < OPENING_HOUR
+      puts "Sorry. The car wash is closed. Please make a phone call tomorrow. \n"
+    else
+      reservation_ok?(index, date, number_plate, :before)
+    end
   end
 
   def create_date_and_insert(index, number_plate)
     index = 0 if index.negative?
-    if index.zero?      # daca e chiar primul adaugat
+    if index.zero?
       insert_first_index(index, number_plate)
-    elsif check_double_time(index)  # daca a gasit o pozitie oke, si avem dublura
+    elsif check_double_time(index)
       date = DateTime.new(2021, @agenda.values[index].month, @agenda.values[index].day, @agenda.values[index].hour + 2, 0, 0)
       reservation_ok?(index, date, number_plate, :after)
     else
@@ -233,30 +320,22 @@ class Scheduler
   end
 end
 
-date = DateTime.new(2021, 4, 21, 8, 0, 0)
-date1 = DateTime.new(2021, 4, 21, 8, 0, 0)
-date2 = DateTime.new(2021, 4, 21, 10, 0, 0)
-date3 = DateTime.new(2021, 4, 21, 10, 0, 0)
-date4 = DateTime.new(2021, 4, 21, 12, 0, 0)
-date5 = DateTime.new(2021, 4, 21, 12, 0, 0)
-date6 = DateTime.new(2021, 4, 21, 14, 0, 0)
-date7 = DateTime.new(2021, 4, 21, 14, 0, 0)
-date8 = DateTime.new(2021, 4, 21, 16, 0, 0)
-date9 = DateTime.new(2021, 4, 21, 16, 0, 0)
-date10 = DateTime.new(2021, 4, 22, 12, 0, 0)
+def case_better_option(scheduler, car)
+  better_time_string = scheduler.find_better_time
+  better_time = DateTime.new(better_time_string[0].to_i, better_time_string[1].to_i,
+                             better_time_string[2].to_i, better_time_string[3].to_i)
+  number_of_reservations = scheduler.agenda.size
+  scheduler.insert_client_reservation(better_time, car.number_plate)
+  if number_of_reservations < scheduler.agenda.size
+    car.date_time_reservation = scheduler.agenda[car.number_plate]
+    scheduler.cars << car
+  end
+  scheduler.better_option = false
+end
 
 scheduler = Scheduler.new
 car_service = CarService.new(scheduler)
-
-#scheduler.agenda['passat'] = date2
-#scheduler.agenda['mercedes'] = date3
-#scheduler.agenda['BMW'] = date4
-#scheduler.agenda['honda2'] = date5
-#scheduler.agenda['skoda2'] = date6
-#scheduler.agenda['passat2'] = date7
-#scheduler.agenda['mercedes2'] = date8
-#scheduler.agenda['BMW2'] = date9
-#scheduler.agenda['BMW3'] = date10
+car_service.current_time = DateTime.new(DateTime.now.year, DateTime.now.month, DateTime.now.day, DateTime.now.hour)
 
 puts "Welcome! \n"
 puts "Make a reservation or pick-up a car? Please type reservation or pick-up. \n"
@@ -264,27 +343,29 @@ puts "Make a reservation or pick-up a car? Please type reservation or pick-up. \
 command = gets.chomp
 
 until command == 'exit'
-  case command
+  case command.downcase
   when 'reservation'
     puts "Please enter the number plate: \n"
     car = Car.new(gets.chomp)
     scheduler.make_fastest_reservation(car.number_plate)
     if scheduler.better_option
-      better_time_string = scheduler.find_better_time
-      better_time = DateTime.new(better_time_string[0].to_i, better_time_string[1].to_i,
-                                 better_time_string[2].to_i, better_time_string[3].to_i)
-      scheduler.insert_client_reservation(better_time, car.number_plate)
-      scheduler.better_option = false
+      case_better_option(scheduler, car)
+    else
+      car.date_time_reservation = scheduler.agenda[car.number_plate]
+      scheduler.cars << car
     end
   when 'pick-up'
-    puts 'To be implemented'
+    puts "Please enter the number plate: \n"
+    number_plate = gets.chomp
+    car_service.pick_up_car(number_plate)
+  when 'fwd'
+    car_service.forward_time
   else
     puts 'Please be more careful at spelling'
   end
-
+  car_service.check_status_cars
   puts "\nCurrent agenda: \n"
-  scheduler.agenda.each { |keys, value| puts "#{keys.to_s}  #{value.to_s}" }
+  scheduler.agenda.each { |keys, value| puts "#{keys}  #{value}" }
   puts "\nWhat do you want now? \n"
   command = gets.chomp
-
 end
