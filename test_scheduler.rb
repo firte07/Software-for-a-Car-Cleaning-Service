@@ -1,20 +1,21 @@
 require 'timecop'
-require_relative '../E/car_cleaning_service'
+require_relative '../E/scheduler'
+require_relative '../E/car'
+require_relative '../E/car_service'
 
 describe 'Scheduler' do
   before { Timecop.freeze(DateTime.new(2021, 4, 22, 10, 0, 0)) }
   subject { Scheduler.new }
 
   describe '.make_fastest_reservation' do
-    before do
-      def receive_confirmation
-        'yes'
-      end
-    end
 
     it 'finds fastest free space' do
-      result = subject.make_fastest_reservation('MM37FRT')
-      expect(result).to eq 'it does not work'
+      allow(subject).to receive(:receive_confirmation) { 'yes' }
+
+      agenda_size = subject.agenda.size
+      subject.make_fastest_reservation('MM37FRT')
+
+      expect(subject.agenda.size).to eq agenda_size + 1
     end
   end
 

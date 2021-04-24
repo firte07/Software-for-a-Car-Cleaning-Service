@@ -1,4 +1,6 @@
-require_relative '../E/car_cleaning_service'
+require_relative '../E/scheduler'
+require_relative '../E/car'
+require_relative '../E/car_service'
 require 'timecop'
 
 describe 'CarService' do
